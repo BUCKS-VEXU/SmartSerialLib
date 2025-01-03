@@ -24,6 +24,8 @@ State ResponseStateMachine::getCurrentState() {
     return currentState;
 }
 
+// TODO the state machine doesn't report any errors to SmartSerial right now
+
 void ResponseStateMachine::loop(uint8_t byte) {
     this->smartSerial->totalBytesRead++;
 

@@ -18,6 +18,7 @@
 struct SmartSerialDiagnostic {
     uint8_t currentUUID;
     State currentState;
+    int availableBytes;
     size_t totalBytesRead;
     size_t totalBytesWritten;
     size_t readErrors;

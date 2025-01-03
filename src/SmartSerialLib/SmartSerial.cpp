@@ -18,6 +18,7 @@ void SmartSerial::serialReader_fn(void *ignore) {
         // Read all available bytes from the serial port
         serialMutex.lock();
         this->availableBytes = serial.get_read_avail();
+        serialMutex.unlock();
         for (; availableBytes > 0; availableBytes--) {
             serialMutex.lock();
             uint32_t byte = serial.read_byte();
@@ -30,7 +31,7 @@ void SmartSerial::serialReader_fn(void *ignore) {
 
             stateMachine.loop(static_cast<uint8_t>(byte));
         }
-        serialMutex.unlock();
+
         pros::Task::delay(10);
     }
 }
@@ -70,8 +71,6 @@ bool SmartSerial::removePayload(uint8_t UUID) {
 int SmartSerial::sendRequest(Request &request) {
     request.setUUID(currentUUID++);
     std::vector<uint8_t> serializedRequest = request.serializeRequest();
-
-    // TODO maybe I need to ensure synchronized serial writes to avoid EACCES
 
     const size_t requestLength = serializedRequest.size();
 
@@ -147,12 +146,13 @@ int64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
     const uint64_t pingTime = pros::micros() - startTime;
 
     // Return 0 if the ping response was not the expected value
-    return (pingByte == ping.getPingResponse()) ? pingTime : -2;
+    return (pingByte == ping.getPingResponse()) ? pingTime : -4;
 }
 
 SmartSerialDiagnostic SmartSerial::getDiagnostics() {
     return {.currentUUID = currentUUID,
             .currentState = stateMachine.getCurrentState(),
+            .availableBytes = availableBytes,
             .totalBytesRead = totalBytesRead,
             .totalBytesWritten = totalBytesWritten,
             .readErrors = readErrors,
