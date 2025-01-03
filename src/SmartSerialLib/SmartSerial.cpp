@@ -1,10 +1,15 @@
 /* Noah Klein */
 
 #include "pros/adi.h"
+#include "pros/rtos.hpp"
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <vector>
 
+#include "SmartSerialLib/protocol/ProtocolDefinitions.hpp"
 #include "SmartSerialLib/SmartSerial.hpp"
 
 void SmartSerial::serialReader_fn(void *ignore) {
@@ -26,9 +31,37 @@ void SmartSerial::serialReader_fn(void *ignore) {
     }
 }
 
+// TODO test
+int SmartSerial::addResponse(SerialResponse *response) {
+    const uint8_t &UUID = response->UUID;
+
+    std::lock_guard<pros::Mutex> lock(responseMutex);
+
+    bool responseInMap = responseMap.find(UUID) != responseMap.end();
+
+    responseMap[UUID] = *response;
+
+    // If there is a task waiting for a response with this UUID, notify it
+    if (waitingTasks.find(UUID) != waitingTasks.end()) {
+        pros::Task waitingTask = waitingTasks[UUID];
+        waitingTasks.erase(UUID);
+        waitingTask.notify();
+    }
+
+    if (responseInMap) {
+        std::cout << "Response with UUID " << UUID
+                  << " already exists in map\n";
+        return -1;
+    }
+
+    return 0;
+}
+
 int SmartSerial::sendRequest(Request &request) {
     request.setUUID(currentUUID++);
     std::vector<uint8_t> serializedRequest = request.serializeRequest();
+
+    // TODO maybe I need to ensure synchronized serial writes to avoid EACCES
 
     size_t requestLength = serializedRequest.size();
     size_t bytesWritten = serial.write(serializedRequest.data(), requestLength);
@@ -44,40 +77,28 @@ int SmartSerial::sendRequest(Request &request) {
 
 SerialResponse *SmartSerial::getResponse(uint8_t UUID) {
     // TODO, make sure this works
-    std::lock_guard<pros::Mutex> lock(responseMapMutex);
+    std::lock_guard<pros::Mutex> lock(responseMutex);
     auto it = responseMap.find(UUID);
     return (it != responseMap.end()) ? &it->second : nullptr;
 }
 
 // TODO verify this works
-SerialResponse *SmartSerial::waitForResponse(uint8_t UUID,
-                                             uint32_t busyWaitMs,
-                                             uint32_t timeoutMs) {
-    const uint32_t startTime = pros::millis();
-    const uint32_t busyWaitEnd = startTime + busyWaitMs;
+SerialResponse *SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
+    pros::Task currentTask = pros::Task::current();
 
-    // "Busy wait" for a response for busyWaitMs milliseconds
-    while (pros::millis() < busyWaitEnd) {
-        if (SerialResponse *response = getResponse(UUID)) {
-            return response;
-        }
-        pros::Task::delay(1);
-    }
+    this->waitingTasks[UUID] = currentTask;
 
-    // Wait for a response for timeoutMs milliseconds since startTime
-    while (pros::millis() < startTime + timeoutMs) {
-        if (SerialResponse *response = getResponse(UUID)) {
-            return response;
-        }
-        pros::Task::delay(10);
-    }
+    currentTask.notify_clear();
 
-    return nullptr;
+    // TODO i don't know if this should be in a while loop
+    int beforeClear = currentTask.notify_take(true, timeoutMs);
+
+    return beforeClear ? &responseMap[UUID] : nullptr;
 }
 
 bool SmartSerial::removeResponseFromMap(uint8_t UUID) {
     // TODO, ensure this works
-    std::lock_guard<pros::Mutex> lock(responseMapMutex);
+    std::lock_guard<pros::Mutex> lock(responseMutex);
 
     auto it = responseMap.find(UUID);
     if (it != responseMap.end()) {
@@ -97,8 +118,7 @@ bool SmartSerial::sendAndDeserializeResponse(Request &request,
     }
 
     // Step 2: Wait for a response
-    SerialResponse *response =
-        this->waitForResponse(sentUUID, busyWaitMs, timeoutMs);
+    SerialResponse *response = this->waitForResponse(sentUUID, timeoutMs);
     if (response == nullptr) {
         return false; // Response not received in time
     }
