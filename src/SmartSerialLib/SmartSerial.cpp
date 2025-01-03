@@ -1,7 +1,5 @@
 /* Noah Klein */
 
-#include "pros/adi.h"
-#include "pros/rtos.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -9,31 +7,38 @@
 #include <mutex>
 #include <vector>
 
+#include "pros/adi.h"
+#include "pros/rtos.hpp"
+
 #include "SmartSerialLib/SmartSerial.hpp"
 
 void SmartSerial::serialReader_fn(void *ignore) {
-    uint32_t startTime = pros::millis();
-
     while (true) {
-        // TODO maybe this needs a timeout so that it can't read indefinitely
+        // TODO clean up mutex usage
         // Read all available bytes from the serial port
-        while (serial.get_read_avail() > 0) {
+        serialMutex.lock();
+        this->availableBytes = serial.get_read_avail();
+        for (; availableBytes > 0; availableBytes--) {
+            serialMutex.lock();
             uint32_t byte = serial.read_byte();
+            serialMutex.unlock();
+
             if (byte == PROS_ERR || byte == -1) {
                 std::cout << "Error reading byte from serial port\n";
                 readErrors++;
-                continue;
             }
+
             stateMachine.loop(static_cast<uint8_t>(byte));
         }
-        pros::Task::delay_until(&startTime, 10);
+        serialMutex.unlock();
+        pros::Task::delay(10);
     }
 }
 
 int SmartSerial::addResponse(SerialResponse &response) {
     const uint8_t &UUID = response.UUID;
 
-    std::lock_guard<pros::Mutex> lock(responseMutex);
+    std::lock_guard<pros::Mutex> lock(payloadMutex);
 
     bool hadPayload = payloads[UUID].has_value();
     // TODO i'm not certain that this properly constructs a new shared pointer,
@@ -56,7 +61,7 @@ int SmartSerial::addResponse(SerialResponse &response) {
 }
 
 bool SmartSerial::removePayload(uint8_t UUID) {
-    std::lock_guard<pros::Mutex> lock(responseMutex);
+    std::lock_guard<pros::Mutex> lock(payloadMutex);
     bool hadPayload = payloads[UUID].has_value();
     payloads[UUID] = std::nullopt;
     return hadPayload;
@@ -69,11 +74,18 @@ int SmartSerial::sendRequest(Request &request) {
     // TODO maybe I need to ensure synchronized serial writes to avoid EACCES
 
     const size_t requestLength = serializedRequest.size();
-    int bytesWritten = serial.write(serializedRequest.data(), requestLength);
 
-    if (bytesWritten != requestLength) {
+    serialMutex.lock();
+    int bytesWritten = serial.write(serializedRequest.data(), requestLength);
+    serialMutex.unlock();
+
+    if (bytesWritten == PROS_ERR) {
         writeErrors++;
         return -1;
+    }
+    if (bytesWritten != requestLength) {
+        writeErrors++;
+        return -2;
     }
 
     totalBytesWritten += bytesWritten;
@@ -81,7 +93,7 @@ int SmartSerial::sendRequest(Request &request) {
 }
 
 payload_t SmartSerial::getPayload(uint8_t UUID) {
-    std::lock_guard<pros::Mutex> lock(responseMutex);
+    std::lock_guard<pros::Mutex> lock(payloadMutex);
 
     payload_t payload = payloads[UUID].value_or(nullptr);
     payloads[UUID] = std::nullopt;
@@ -100,18 +112,18 @@ payload_t SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
     return beforeClear ? this->getPayload(UUID) : nullptr;
 }
 
-bool SmartSerial::sendAndDeserializeResponse(Request &request,
-                                             uint32_t timeoutMs) {
+int SmartSerial::sendAndDeserializeResponse(Request &request,
+                                            uint32_t timeoutMs) {
     // Step 1: Send request
     int sentUUID = this->sendRequest(request);
     if (sentUUID == -1) {
-        return false; // Sending failed
+        return -1; // Sending failed
     }
 
     // Step 2: Wait for a response
     payload_t payload = this->waitForResponse(sentUUID, timeoutMs);
     if (payload == nullptr) {
-        return false; // Response not received in time
+        return -2; // Response not received in time
     }
 
     // Step 3: Deserialize the response
@@ -119,23 +131,23 @@ bool SmartSerial::sendAndDeserializeResponse(Request &request,
         request.deserializeResponsePayload(*payload);
     } catch (const std::exception &e) {
         deserializationFailures++;
-        return false; // Deserialization failed
+        return -3; // Deserialization failed
     }
 
-    return true;
+    return 0;
 }
 
-uint64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
+int64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
     PingRequest ping(pingByte);
     ping.setUUID(currentUUID++);
     const uint64_t startTime = pros::micros();
-    if (!sendAndDeserializeResponse(ping, timeoutMs)) {
-        return 0;
+    if (int errorCode = !sendAndDeserializeResponse(ping, timeoutMs)) {
+        return errorCode;
     }
     const uint64_t pingTime = pros::micros() - startTime;
 
     // Return 0 if the ping response was not the expected value
-    return (pingByte == ping.getPingResponse()) ? pingTime : 0;
+    return (pingByte == ping.getPingResponse()) ? pingTime : -2;
 }
 
 SmartSerialDiagnostic SmartSerial::getDiagnostics() {

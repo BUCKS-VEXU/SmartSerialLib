@@ -27,22 +27,25 @@ struct SmartSerialDiagnostic {
 
 class SmartSerial {
   private:
+    pros::Mutex serialMutex;
     pros::Serial serial;
+
     pros::Task serialReader;
+    void serialReader_fn(void *ignore);
 
     static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
     uint8_t currentUUID = 0;
 
     // Diagnostic information
+    int availableBytes = 0;
     size_t totalBytesRead = 0;
     size_t totalBytesWritten = 0;
     size_t readErrors = 0;
     size_t writeErrors = 0;
     size_t deserializationFailures = 0;
 
-    void serialReader_fn(void *ignore);
-
-    pros::Mutex responseMutex;
+    // TODO weigh the synchronization against the time cost of a mutex here
+    pros::Mutex payloadMutex;
     // ! these two maps currently take up 5120 bytes of memory
     std::array<std::optional<payload_t>, MAX_RESPONSES> payloads;
     std::array<std::optional<pros::Task>, MAX_RESPONSES> waitingTasks;
@@ -55,7 +58,8 @@ class SmartSerial {
   public:
     SmartSerial(const int port, const int baudrate = 115200) :
         serial(port, baudrate),
-        responseMutex(),
+        serialMutex(),
+        payloadMutex(),
         payloads(),
         waitingTasks(),
         stateMachine(this),
@@ -73,7 +77,8 @@ class SmartSerial {
      *
      * @param request the request to send
      * @return the request's UUID if the request was successfully sent
-     * @return -1 if the request was not successfully sent
+     * @return -1 if PROS_ERR was returned by serial.write()
+     * @return -2 if the whole serialized message was not written
      */
     int sendRequest(Request &request);
 
@@ -115,13 +120,12 @@ class SmartSerial {
      * request sent will be removed from the response map after deserialization.
      *
      * @param request
-     * @return true if the response was successfully sent, received and
-     * deserialized
-     * @return false if any part of the sending, receiving or deserialization
-     * process failed
+     * @return 0 if the process was successful
+     * @return -1 if sending the request failed
+     * @return -2 if the response was not received in time
+     * @return -3 if deserialization failed
      */
-    bool sendAndDeserializeResponse(Request &request,
-                                    uint32_t timeoutMs = 1000);
+    int sendAndDeserializeResponse(Request &request, uint32_t timeoutMs = 1000);
 
     /**
      * @brief Sends a ping request with the given byte, then verifies that that
@@ -129,11 +133,14 @@ class SmartSerial {
      *
      * @param pingByte the byte to send in the ping request
      * @param timeoutMs the time to wait for a response
-     * @return u_int64_t the number of microseconds it took to receive a
+     * @return int64_t the number of microseconds it took to receive a
      * response
-     * @return 0 if no response was received in time
+     * @return -1 if sending the ping failed
+     * @return -2 if the response was not received in time
+     * @return -3 if deserializing the ping failed
+     * @return -4 if the byte received does not match `pingByte`
      */
-    u_int64_t ping(uint8_t pingByte, uint32_t timeoutMs);
+    int64_t ping(uint8_t pingByte, uint32_t timeoutMs);
 
     /**
      * @brief Returns diagnostic information about this SmartSerial instance
