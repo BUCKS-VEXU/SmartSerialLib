@@ -1,13 +1,11 @@
 /* Noah Klein */
 
-#include "SmartSerialLib/ResponseStateMachine.hpp"
-#include "SmartSerialLib/SmartSerial.hpp"
-#include "SmartSerialLib/protocol/ProtocolDefinitions.hpp"
-
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <vector>
+
+#include "SmartSerialLib/SmartSerial.hpp"
 
 inline void ResponseStateMachine::reset() {
     currentState = STATE_IDLE;
@@ -34,7 +32,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
         if (byte == START_MARKER) {
             currentState = STATE_UUID;
         } else {
-            std::cout << "Expected start marker, " << START_MARKER
+            std::cout << "Expected start marker, " << std::hex << START_MARKER
                       << ", but received " << std::hex << byte << "\n";
         }
         break;
@@ -60,7 +58,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
     case STATE_PAYLOAD:
         if (bufferIndex == payloadLength) {
             currentState = STATE_CHECKSUM;
-            return;
+            break;
         }
         buffer[bufferIndex++] = byte;
         calculatedChecksum += byte;
@@ -72,7 +70,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
             std::cout << "Checksum mismatch\n Expected:" << calculatedChecksum
                       << "\n Received: " << checksum << "\n";
             this->reset();
-            break;
+            return;
         }
 
         currentState = STATE_COMPLETE;
@@ -80,7 +78,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
 
     case STATE_COMPLETE:
         if (byte != END_MARKER) {
-            std::cout << "Expected end marker, " << END_MARKER
+            std::cout << "Expected end marker, " << std::hex << END_MARKER
                       << ", but received " << std::hex << byte << "\n";
             this->reset();
             return;
@@ -91,7 +89,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
         SerialResponse response = {
             UUID, commandID, payloadLength, payload, checksum};
 
-        this->smartSerial->addResponse(&response);
+        this->smartSerial->addResponse(response);
         this->reset();
 
         break;

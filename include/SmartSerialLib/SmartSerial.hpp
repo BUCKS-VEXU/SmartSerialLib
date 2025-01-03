@@ -8,8 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <sys/types.h>
-#include <unordered_map>
-#include <vector>
 
 #include "protocol/ProtocolDefinitions.hpp"
 #include "protocol/Requests/Request.hpp"
@@ -18,7 +16,6 @@
 #include "ResponseStateMachine.hpp"
 
 struct SmartSerialDiagnostic {
-    size_t responseMapSize;
     uint8_t currentUUID;
     State currentState;
     size_t totalBytesRead;
@@ -33,6 +30,7 @@ class SmartSerial {
     pros::Serial serial;
     pros::Task serialReader;
 
+    static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
     uint8_t currentUUID = 0;
 
     // Diagnostic information
@@ -44,21 +42,21 @@ class SmartSerial {
 
     void serialReader_fn(void *ignore);
 
-    // TODO this probably doesn't need to be a map, a small buffer might suffice
     pros::Mutex responseMutex;
-    std::unordered_map<uint8_t, SerialResponse> responseMap;
-    std::unordered_map<uint8_t, pros::Task> waitingTasks;
+    // ! these two maps currently take up 5120 bytes of memory
+    std::array<std::optional<payload_t>, MAX_RESPONSES> payloads;
+    std::array<std::optional<pros::Task>, MAX_RESPONSES> waitingTasks;
 
     friend class ResponseStateMachine;
     ResponseStateMachine stateMachine;
 
-    int addResponse(SerialResponse *response);
+    int addResponse(SerialResponse &response);
 
   public:
     SmartSerial(const int port, const int baudrate = 115200) :
         serial(port, baudrate),
         responseMutex(),
-        responseMap(),
+        payloads(),
         waitingTasks(),
         stateMachine(this),
         // TODO God only knows if this works
@@ -79,40 +77,37 @@ class SmartSerial {
      */
     int sendRequest(Request &request);
 
-    // TODO update this documentation for notifications
-
     /**
-     * @brief Returns a pointer to the `SerialResponse` with the given UUID,
-     * or nullptr if said response does not exist.
+     * @brief Returns a shared pointer to the payload at the given UUID,
+     * or nullptr if said payload does not exist. Removes the shared pointer in
+     * the array before returning.
      *
      * @param UUID
-     * @return SerialResponse* if the response is in the map
-     * @return nullptr if the response is not in the map
+     * @return payload_t if the payload is present
+     * @return nullptr if the payload is not present
      */
-    SerialResponse *getResponse(uint8_t UUID);
+    payload_t getPayload(uint8_t UUID);
 
     /**
      * @brief Blocking operation that waits for a response with the given UUID,
-     * then returns a pointer to the response in the response map
+     * then returns a shared pointer to the response's payload. Removes the
+     * shared pointer in the array before returning.
      *
      * @param UUID the UUID of the response to wait for
-     * @param busyWaitMs the time to busy wait for a response before switching
-     * to a pros::delay loop
      * @param timeoutMs the time to wait for a response before returning nullptr
-     * @return SerialResponse*, pointer to the response in the response map, or
-     * nullptr if the response was not received in time
+     * @return payload, shared pointer to the response's payload
+     * @return nullptr if the response was not received in time
      */
-    SerialResponse *waitForResponse(uint8_t UUID, uint32_t timeoutMs = 1000);
+    payload_t waitForResponse(uint8_t UUID, uint32_t timeoutMs = 1000);
 
     /**
-     * @brief Attempts to remove a response from the response map with the given
-     * UUID
+     * @brief Sets the payload at UUID to std::nullopt
      *
-     * @param UUID the UUID of the response to remove
-     * @return true if a response was removed from the map
-     * @return false if no response was removed from the map
+     * @param UUID the UUID of the payload to make std::nullopt
+     * @return true if there was a payload to remove
+     * @return false if the payload was already std::nullopt
      */
-    bool removeResponseFromMap(uint8_t UUID);
+    bool removePayload(uint8_t UUID);
 
     /**
      * @brief A blocking operation that sends a request, then deserializes the
@@ -122,15 +117,15 @@ class SmartSerial {
      * @param request
      * @return true if the response was successfully sent, received and
      * deserialized
-     * @return false if any part of the sending or deserialization process
-     * failed
+     * @return false if any part of the sending, receiving or deserialization
+     * process failed
      */
     bool sendAndDeserializeResponse(Request &request,
-                                    uint32_t busyWaitMs = 5,
                                     uint32_t timeoutMs = 1000);
 
     /**
-     * @brief Sends a ping request to the ESP32
+     * @brief Sends a ping request with the given byte, then verifies that that
+     * same byte was returned
      *
      * @param pingByte the byte to send in the ping request
      * @param timeoutMs the time to wait for a response

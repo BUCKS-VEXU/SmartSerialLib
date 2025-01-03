@@ -9,7 +9,6 @@
 #include <mutex>
 #include <vector>
 
-#include "SmartSerialLib/protocol/ProtocolDefinitions.hpp"
 #include "SmartSerialLib/SmartSerial.hpp"
 
 void SmartSerial::serialReader_fn(void *ignore) {
@@ -31,24 +30,23 @@ void SmartSerial::serialReader_fn(void *ignore) {
     }
 }
 
-// TODO test
-int SmartSerial::addResponse(SerialResponse *response) {
-    const uint8_t &UUID = response->UUID;
+int SmartSerial::addResponse(SerialResponse &response) {
+    const uint8_t &UUID = response.UUID;
 
     std::lock_guard<pros::Mutex> lock(responseMutex);
 
-    bool responseInMap = responseMap.find(UUID) != responseMap.end();
+    bool hadPayload = payloads[UUID].has_value();
+    // TODO i'm not certain that this properly constructs a new shared pointer,
+    // it probably does.
+    payloads[UUID] = response.payload;
 
-    responseMap[UUID] = *response;
-
-    // If there is a task waiting for a response with this UUID, notify it
-    if (waitingTasks.find(UUID) != waitingTasks.end()) {
-        pros::Task waitingTask = waitingTasks[UUID];
-        waitingTasks.erase(UUID);
-        waitingTask.notify();
+    // Is there a task waiting for a response with this UUID, notify it
+    if (waitingTasks[UUID].has_value()) {
+        pros::Task waitingTask = waitingTasks[UUID].value();
+        waitingTasks[UUID] = std::nullopt;
     }
 
-    if (responseInMap) {
+    if (hadPayload) {
         std::cout << "Response with UUID " << UUID
                   << " already exists in map\n";
         return -1;
@@ -57,14 +55,21 @@ int SmartSerial::addResponse(SerialResponse *response) {
     return 0;
 }
 
+bool SmartSerial::removePayload(uint8_t UUID) {
+    std::lock_guard<pros::Mutex> lock(responseMutex);
+    bool hadPayload = payloads[UUID].has_value();
+    payloads[UUID] = std::nullopt;
+    return hadPayload;
+}
+
 int SmartSerial::sendRequest(Request &request) {
     request.setUUID(currentUUID++);
     std::vector<uint8_t> serializedRequest = request.serializeRequest();
 
     // TODO maybe I need to ensure synchronized serial writes to avoid EACCES
 
-    size_t requestLength = serializedRequest.size();
-    size_t bytesWritten = serial.write(serializedRequest.data(), requestLength);
+    const size_t requestLength = serializedRequest.size();
+    int bytesWritten = serial.write(serializedRequest.data(), requestLength);
 
     if (bytesWritten != requestLength) {
         writeErrors++;
@@ -75,41 +80,27 @@ int SmartSerial::sendRequest(Request &request) {
     return request.getUUID();
 }
 
-SerialResponse *SmartSerial::getResponse(uint8_t UUID) {
-    // TODO, make sure this works
-    std::lock_guard<pros::Mutex> lock(responseMutex);
-    auto it = responseMap.find(UUID);
-    return (it != responseMap.end()) ? &it->second : nullptr;
-}
-
-// TODO verify this works
-SerialResponse *SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
-    pros::Task currentTask = pros::Task::current();
-
-    this->waitingTasks[UUID] = currentTask;
-
-    currentTask.notify_clear();
-
-    // TODO i don't know if this should be in a while loop
-    int beforeClear = currentTask.notify_take(true, timeoutMs);
-
-    return beforeClear ? &responseMap[UUID] : nullptr;
-}
-
-bool SmartSerial::removeResponseFromMap(uint8_t UUID) {
-    // TODO, ensure this works
+payload_t SmartSerial::getPayload(uint8_t UUID) {
     std::lock_guard<pros::Mutex> lock(responseMutex);
 
-    auto it = responseMap.find(UUID);
-    if (it != responseMap.end()) {
-        responseMap.erase(it);
-        return true;
-    }
-    return false;
+    payload_t payload = payloads[UUID].value_or(nullptr);
+    payloads[UUID] = std::nullopt;
+    return payload;
+}
+
+payload_t SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
+    using namespace pros;
+
+    this->waitingTasks[UUID] = Task::current();
+
+    Task::current().notify_clear();
+
+    int beforeClear = Task::current().notify_take(true, timeoutMs);
+
+    return beforeClear ? this->getPayload(UUID) : nullptr;
 }
 
 bool SmartSerial::sendAndDeserializeResponse(Request &request,
-                                             uint32_t busyWaitMs,
                                              uint32_t timeoutMs) {
     // Step 1: Send request
     int sentUUID = this->sendRequest(request);
@@ -118,35 +109,37 @@ bool SmartSerial::sendAndDeserializeResponse(Request &request,
     }
 
     // Step 2: Wait for a response
-    SerialResponse *response = this->waitForResponse(sentUUID, timeoutMs);
-    if (response == nullptr) {
+    payload_t payload = this->waitForResponse(sentUUID, timeoutMs);
+    if (payload == nullptr) {
         return false; // Response not received in time
     }
 
     // Step 3: Deserialize the response
     try {
-        request.deserializeResponsePayload(*response->payload);
+        request.deserializeResponsePayload(*payload);
     } catch (const std::exception &e) {
         deserializationFailures++;
         return false; // Deserialization failed
     }
 
-    // Step 4: Remove the response from map, return false if it wasn't removed
-    return this->removeResponseFromMap(request.getUUID());
+    return true;
 }
 
 uint64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
     PingRequest ping(pingByte);
     ping.setUUID(currentUUID++);
     const uint64_t startTime = pros::micros();
-    return sendAndDeserializeResponse(ping, timeoutMs)
-               ? (pros::micros() - startTime)
-               : 0;
+    if (!sendAndDeserializeResponse(ping, timeoutMs)) {
+        return 0;
+    }
+    const uint64_t pingTime = pros::micros() - startTime;
+
+    // Return 0 if the ping response was not the expected value
+    return (pingByte == ping.getPingResponse()) ? pingTime : 0;
 }
 
 SmartSerialDiagnostic SmartSerial::getDiagnostics() {
-    return {.responseMapSize = responseMap.size(),
-            .currentUUID = currentUUID,
+    return {.currentUUID = currentUUID,
             .currentState = stateMachine.getCurrentState(),
             .totalBytesRead = totalBytesRead,
             .totalBytesWritten = totalBytesWritten,
