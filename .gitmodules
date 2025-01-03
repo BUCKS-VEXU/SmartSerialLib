@@ -1,0 +1,3 @@
+[submodule "include/SmartSerialLib/protocol"]
+	path = include/SmartSerialLib/protocol
+	url = https://github.com/BUCKS-VEXU/V5-ESP32-Protocol.git
