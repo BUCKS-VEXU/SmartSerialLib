@@ -91,10 +91,7 @@ void ResponseStateMachine::loop(uint8_t byte) {
         SerialResponse response = {
             UUID, commandID, payloadLength, payload, checksum};
 
-        this->smartSerial->responseMapMutex.lock();
-        this->smartSerial->responseMap[UUID] = response;
-        this->smartSerial->responseMapMutex.unlock();
-
+        this->smartSerial->addResponse(&response);
         this->reset();
 
         break;

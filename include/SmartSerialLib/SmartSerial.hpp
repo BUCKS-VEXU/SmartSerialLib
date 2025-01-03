@@ -3,10 +3,13 @@
 #ifndef SERIAL_ESP32_HPP
 #define SERIAL_ESP32_HPP
 
+#include "pros/rtos.hpp"
 #include "pros/serial.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <sys/types.h>
+#include <unordered_map>
+#include <vector>
 
 #include "protocol/ProtocolDefinitions.hpp"
 #include "protocol/Requests/Request.hpp"
@@ -18,11 +21,11 @@ struct SmartSerialDiagnostic {
     size_t responseMapSize;
     uint8_t currentUUID;
     State currentState;
-    size_t totalBytesRead = 0;
-    size_t totalBytesWritten = 0;
-    size_t readErrors = 0;
-    size_t writeErrors = 0;
-    size_t deserializationFailures = 0;
+    size_t totalBytesRead;
+    size_t totalBytesWritten;
+    size_t readErrors;
+    size_t writeErrors;
+    size_t deserializationFailures;
 };
 
 class SmartSerial {
@@ -41,20 +44,22 @@ class SmartSerial {
 
     void serialReader_fn(void *ignore);
 
-    // TODO use task notifications, should be very good for this
-
     // TODO this probably doesn't need to be a map, a small buffer might suffice
-    pros::Mutex responseMapMutex;
+    pros::Mutex responseMutex;
     std::unordered_map<uint8_t, SerialResponse> responseMap;
+    std::unordered_map<uint8_t, pros::Task> waitingTasks;
 
     friend class ResponseStateMachine;
     ResponseStateMachine stateMachine;
 
+    int addResponse(SerialResponse *response);
+
   public:
     SmartSerial(const int port, const int baudrate = 115200) :
         serial(port, baudrate),
+        responseMutex(),
         responseMap(),
-        responseMapMutex(),
+        waitingTasks(),
         stateMachine(this),
         // TODO God only knows if this works
         serialReader(
@@ -73,6 +78,8 @@ class SmartSerial {
      * @return -1 if the request was not successfully sent
      */
     int sendRequest(Request &request);
+
+    // TODO update this documentation for notifications
 
     /**
      * @brief Returns a pointer to the `SerialResponse` with the given UUID,
@@ -95,9 +102,7 @@ class SmartSerial {
      * @return SerialResponse*, pointer to the response in the response map, or
      * nullptr if the response was not received in time
      */
-    SerialResponse *waitForResponse(uint8_t UUID,
-                                    uint32_t busyWaitMs = 5,
-                                    uint32_t timeoutMs = 1000);
+    SerialResponse *waitForResponse(uint8_t UUID, uint32_t timeoutMs = 1000);
 
     /**
      * @brief Attempts to remove a response from the response map with the given
