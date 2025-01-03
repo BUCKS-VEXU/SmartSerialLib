@@ -33,6 +33,9 @@ void ResponseStateMachine::loop(uint8_t byte) {
     case STATE_IDLE:
         if (byte == START_MARKER) {
             currentState = STATE_UUID;
+        } else {
+            std::cout << "Expected start marker, " << START_MARKER
+                      << ", but received " << std::hex << byte << "\n";
         }
         break;
 
@@ -76,9 +79,9 @@ void ResponseStateMachine::loop(uint8_t byte) {
         break;
 
     case STATE_COMPLETE:
-        if (byte != START_MARKER) {
-            std::cout << "Expected end marker, " << START_MARKER
-                      << ", but received " << byte << "\n";
+        if (byte != END_MARKER) {
+            std::cout << "Expected end marker, " << END_MARKER
+                      << ", but received " << std::hex << byte << "\n";
             this->reset();
             return;
         }

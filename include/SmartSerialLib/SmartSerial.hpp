@@ -75,9 +75,8 @@ class SmartSerial {
     int sendRequest(Request &request);
 
     /**
-     * @brief Gets the Response object with the given UUID from the response
-     * map, or nullptr if no response with the given UUID is currently in the
-     * map
+     * @brief Returns a pointer to the `SerialResponse` with the given UUID,
+     * or nullptr if said response does not exist.
      *
      * @param UUID
      * @return SerialResponse* if the response is in the map
