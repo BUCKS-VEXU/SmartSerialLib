@@ -34,8 +34,10 @@ class SmartSerial {
     pros::Task serialReader;
     void serialReader_fn(void *ignore);
 
-    static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
+    // TODO Wisely incrementing currentUUID could allow for
+    // TODO fewer payload overwrites
     uint8_t currentUUID = 0;
+    static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
 
     // Diagnostic information
     int availableBytes = 0;
@@ -48,13 +50,32 @@ class SmartSerial {
     // TODO weigh the synchronization against the time cost of a mutex here
     pros::Mutex payloadMutex;
     // ! these two maps currently take up 5120 bytes of memory
+    // This could be made a lot smaller if I don't care about asynchronous
+    // response gets
+    // TODO tighter bonding between these two could be good
     std::array<std::optional<payload_t>, MAX_RESPONSES> payloads;
     std::array<std::optional<pros::Task>, MAX_RESPONSES> waitingTasks;
 
     friend class ResponseStateMachine;
     ResponseStateMachine stateMachine;
 
+    /**
+     * @brief Adds the response's payload to the payloads array. Notifies a
+     * task, if there is one waiting on this UUID.
+     *
+     * @param response
+     * @return 0 if the payload was successfully added
+     * @return -1 if the payload overwrote a different payload in the array
+     */
     int addResponse(SerialResponse &response);
+
+    /**
+     * @brief Update currentUUID to the next available.
+     * Settle for (currentUUID + 1) if none are found.
+     *
+     * @return uint8_t the value currentUUID was updated to
+     */
+    uint8_t nextUUID();
 
   public:
     SmartSerial(const int port, const int baudrate = 115200) :

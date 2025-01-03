@@ -49,27 +49,39 @@ int SmartSerial::addResponse(SerialResponse &response) {
     // Is there a task waiting for a response with this UUID, notify it
     if (waitingTasks[UUID].has_value()) {
         pros::Task waitingTask = waitingTasks[UUID].value();
-        waitingTasks[UUID] = std::nullopt;
+        // ! It is the waiting task's responsibility to clear its array index
+        waitingTask.notify();
     }
 
     if (hadPayload) {
-        std::cout << "Response with UUID " << UUID
-                  << " already exists in map\n";
+        std::cout << "Payload already present at index " << UUID << "\n";
         return -1;
     }
 
     return 0;
 }
 
+uint8_t SmartSerial::nextUUID() {
+    const uint8_t first = currentUUID + 1;
+    uint8_t next = first;
+    // TODO this can maybe be optimized
+    // Search for the first available index, settle if none are found
+    while (payloads[next].has_value() && next != first) {
+        next++;
+    }
+    return next;
+}
+
 bool SmartSerial::removePayload(uint8_t UUID) {
     std::lock_guard<pros::Mutex> lock(payloadMutex);
     bool hadPayload = payloads[UUID].has_value();
     payloads[UUID] = std::nullopt;
+    waitingTasks[UUID] = std::nullopt;
     return hadPayload;
 }
 
 int SmartSerial::sendRequest(Request &request) {
-    request.setUUID(currentUUID++);
+    request.setUUID(nextUUID());
     std::vector<uint8_t> serializedRequest = request.serializeRequest();
 
     const size_t requestLength = serializedRequest.size();
@@ -105,10 +117,12 @@ payload_t SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
     this->waitingTasks[UUID] = Task::current();
 
     Task::current().notify_clear();
+    int notified = Task::current().notify_take(true, timeoutMs);
 
-    int beforeClear = Task::current().notify_take(true, timeoutMs);
+    // Clear the array index so that this task is not notified again
+    waitingTasks[UUID] = std::nullopt;
 
-    return beforeClear ? this->getPayload(UUID) : nullptr;
+    return notified ? this->getPayload(UUID) : nullptr;
 }
 
 int SmartSerial::sendAndDeserializeResponse(Request &request,
@@ -138,14 +152,14 @@ int SmartSerial::sendAndDeserializeResponse(Request &request,
 
 int64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
     PingRequest ping(pingByte);
-    ping.setUUID(currentUUID++);
+
     const uint64_t startTime = pros::micros();
     if (int errorCode = !sendAndDeserializeResponse(ping, timeoutMs)) {
         return errorCode;
     }
     const uint64_t pingTime = pros::micros() - startTime;
 
-    // Return 0 if the ping response was not the expected value
+    // Return -4 if the ping response was not the expected value
     return (pingByte == ping.getPingResponse()) ? pingTime : -4;
 }
 
