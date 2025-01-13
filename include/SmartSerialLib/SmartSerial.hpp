@@ -16,7 +16,7 @@
 #include "ResponseStateMachine.hpp"
 
 struct SmartSerialDiagnostic {
-    uint8_t currentUUID;
+    uint8_t lastUUID;
     State currentState;
     int availableBytes;
     size_t totalBytesRead;
@@ -34,9 +34,9 @@ class SmartSerial {
     pros::Task serialReader;
     void serialReader_fn(void *ignore);
 
-    // TODO Wisely incrementing currentUUID could allow for
+    // TODO Wisely incrementing lastUUID could allow for
     // TODO fewer payload overwrites
-    uint8_t currentUUID = 0;
+    uint8_t lastUUID = 0;
     static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
 
     // Diagnostic information
@@ -70,10 +70,10 @@ class SmartSerial {
     int addResponse(SerialResponse &response);
 
     /**
-     * @brief Update currentUUID to the next available.
-     * Settle for (currentUUID + 1) if none are found.
+     * @brief Update lastUUID to the next available.
+     * Settle for (lastUUID + 1) if none are found.
      *
-     * @return uint8_t the value currentUUID was updated to
+     * @return uint8_t the value lastUUID was updated to
      */
     uint8_t nextUUID();
 
@@ -95,7 +95,7 @@ class SmartSerial {
 
     /**
      * @brief Sends a request, updating the UUID of `request` and incrementing
-     * `this->currentUUID`
+     * `this->lastUUID`
      *
      * @param request the request to send
      * @return the request's UUID if the request was successfully sent

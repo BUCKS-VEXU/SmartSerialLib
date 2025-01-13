@@ -49,7 +49,7 @@ int SmartSerial::addResponse(SerialResponse &response) {
     // Is there a task waiting for a response with this UUID, notify it
     if (waitingTasks[UUID].has_value()) {
         pros::Task waitingTask = waitingTasks[UUID].value();
-        // ! It is the waiting task's responsibility to clear its array index
+        // ! It is the waiting task's responsibility to nullopt its array index
         waitingTask.notify();
     }
 
@@ -62,13 +62,17 @@ int SmartSerial::addResponse(SerialResponse &response) {
 }
 
 uint8_t SmartSerial::nextUUID() {
-    const uint8_t first = currentUUID + 1;
+    const uint8_t first = lastUUID + 1;
     uint8_t next = first;
-    // TODO this can maybe be optimized
+
     // Search for the first available index, settle if none are found
-    while (payloads[next].has_value() && next != first) {
-        next++;
+    if (payloads[first].has_value()) {
+        do {
+            next++;
+        } while (payloads[next].has_value() && next != first);
     }
+
+    lastUUID = next;
     return next;
 }
 
@@ -114,12 +118,12 @@ payload_t SmartSerial::getPayload(uint8_t UUID) {
 payload_t SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
     using namespace pros;
 
-    this->waitingTasks[UUID] = Task::current();
+    waitingTasks[UUID] = Task::current();
 
     Task::current().notify_clear();
     int notified = Task::current().notify_take(true, timeoutMs);
 
-    // Clear the array index so that this task is not notified again
+    // nullopt array index so this task is not notified again
     waitingTasks[UUID] = std::nullopt;
 
     return notified ? this->getPayload(UUID) : nullptr;
@@ -128,7 +132,7 @@ payload_t SmartSerial::waitForResponse(uint8_t UUID, uint32_t timeoutMs) {
 int SmartSerial::sendAndDeserializeResponse(Request &request,
                                             uint32_t timeoutMs) {
     // Step 1: Send request
-    int sentUUID = this->sendRequest(request);
+    const int sentUUID = this->sendRequest(request);
     if (sentUUID == -1) {
         return -1; // Sending failed
     }
@@ -164,7 +168,7 @@ int64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
 }
 
 SmartSerialDiagnostic SmartSerial::getDiagnostics() {
-    return {.currentUUID = currentUUID,
+    return {.lastUUID = lastUUID,
             .currentState = stateMachine.getCurrentState(),
             .availableBytes = availableBytes,
             .totalBytesRead = totalBytesRead,
