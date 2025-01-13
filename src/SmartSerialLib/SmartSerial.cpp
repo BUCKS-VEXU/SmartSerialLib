@@ -20,6 +20,7 @@ void SmartSerial::serialReader_fn(void *ignore) {
         this->availableBytes = serial.get_read_avail();
         serialMutex.unlock();
         for (; availableBytes > 0; availableBytes--) {
+            std::cout << "Got some bytes " << availableBytes << "\n";
             serialMutex.lock();
             uint32_t byte = serial.read_byte();
             serialMutex.unlock();
@@ -154,10 +155,15 @@ int64_t SmartSerial::ping(uint8_t pingByte, uint32_t timeoutMs) {
     PingRequest ping(pingByte);
 
     const uint64_t startTime = pros::micros();
-    if (int errorCode = !sendAndDeserializeResponse(ping, timeoutMs)) {
+    int errorCode;
+    if (!(errorCode = sendAndDeserializeResponse(ping, timeoutMs))) {
         return errorCode;
     }
     const uint64_t pingTime = pros::micros() - startTime;
+
+    // std::cout << "PingByte " << std::hex << pingByte << "\nReponse " <<
+    // std::hex
+    //           << ping.getPingResponse() << "\n";
 
     // Return -4 if the ping response was not the expected value
     return (pingByte == ping.getPingResponse()) ? pingTime : -4;
