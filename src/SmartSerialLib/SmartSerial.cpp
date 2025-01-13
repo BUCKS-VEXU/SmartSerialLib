@@ -47,11 +47,10 @@ int SmartSerial::addResponse(SerialResponse &response) {
     // it probably does.
     payloads[UUID] = response.payload;
 
-    // Is there a task waiting for a response with this UUID, notify it
+    // Is there a task waiting for a response with this UUID? Notify it
     if (waitingTasks[UUID].has_value()) {
-        pros::Task waitingTask = waitingTasks[UUID].value();
         // ! It is the waiting task's responsibility to nullopt its array index
-        waitingTask.notify();
+        waitingTasks[UUID].value().notify();
     }
 
     if (hadPayload) {
@@ -139,7 +138,8 @@ int SmartSerial::sendAndDeserializeResponse(Request &request,
     }
 
     // Step 2: Wait for a response
-    payload_t payload = this->waitForResponse(sentUUID, timeoutMs);
+    payload_t payload =
+        this->waitForResponse(static_cast<uint8_t>(sentUUID), timeoutMs);
     if (payload == nullptr) {
         return -2; // Response not received in time
     }

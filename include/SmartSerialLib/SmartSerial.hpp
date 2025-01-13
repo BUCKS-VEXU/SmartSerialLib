@@ -34,8 +34,6 @@ class SmartSerial {
     pros::Task serialReader;
     void serialReader_fn(void *ignore);
 
-    // TODO Wisely incrementing lastUUID could allow for
-    // TODO fewer payload overwrites
     uint8_t lastUUID = 0;
     static constexpr size_t MAX_RESPONSES = UINT8_MAX + 1;
 
