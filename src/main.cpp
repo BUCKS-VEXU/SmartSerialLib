@@ -3,17 +3,30 @@
 #include "main.h"
 
 #include "SmartSerialLib/SmartSerial.hpp"
-#include "SmartSerialLib/protocol/Requests/Requests.hpp"
 
-pros::Controller controller(pros::E_CONTROLLER_MASTER);
-SmartSerial esp32Serial(0);
+// SmartSerial esp32Serial(15);
+pros::Serial serial(9, 5000);
+
+static uint8_t byte = 0x00;
+
+void onCenterButton() {
+    int writeVal = serial.write_byte(++byte);
+    if (writeVal == PROS_ERR)
+        std::cout << "Write error" << std::endl;
+    else
+        std::cout << "Wrote " << static_cast<int>(byte) << std::endl;
+}
 
 /**
  * (Ideally) called once on program start
  */
 void initialize() {
-    GetPoseRequest pose;
-    esp32Serial.sendAndDeserializeResponse(pose, 1000);
+    // int pingResponse = esp32Serial.ping(0xAE, 1000);
+    // std::cout << "Ping took " << pingResponse << " microseconds" <<
+    // std::endl;'
+    pros::lcd::initialize();
+    pros::lcd::register_btn1_cb(onCenterButton);
+    std::cout << "Serial is installed " << serial.is_installed() << std::endl;
 }
 
 void disabled() {}
@@ -23,12 +36,16 @@ void competition_initialize() {}
 void autonomous() {}
 
 void opcontrol() {
+
     while (true) {
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
-            std::cout << "Ping took " << esp32Serial.ping(0xFE, 1000)
-                      << " microseconds" << std::endl;
+        // int pingResponse = esp32Serial.ping(0xAE, 1000);
+        // std::cout << "Ping took " << pingResponse << " microseconds"
+        //           << std::endl;
+
+        if (serial.get_read_avail()) {
+            std::cout << "\nRead: " << serial.read_byte() << std::endl;
         }
 
-        pros::delay(20); // Run for 20 ms then update
+        pros::delay(20);
     }
 }
