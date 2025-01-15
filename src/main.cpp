@@ -5,7 +5,7 @@
 #include "SmartSerialLib/SmartSerial.hpp"
 
 // SmartSerial esp32Serial(15);
-pros::Serial serial(9, 5000);
+pros::Serial serial(8, 9600);
 
 static uint8_t byte = 0x00;
 
@@ -43,7 +43,9 @@ void opcontrol() {
         //           << std::endl;
 
         if (serial.get_read_avail()) {
-            std::cout << "\nRead: " << serial.read_byte() << std::endl;
+            uint8_t readByte = serial.read_byte();
+            std::cout << "Read: " << readByte << std::endl;
+            pros::lcd::print(0, "Read: %d", readByte);
         }
 
         pros::delay(20);
