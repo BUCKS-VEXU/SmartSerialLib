@@ -1,7 +1,9 @@
 /* Noah Klein */
 
-#ifndef SERIAL_ESP32_HPP
-#define SERIAL_ESP32_HPP
+#ifndef SMART_SERIAL_HPP
+#define SMART_SERIAL_HPP
+
+#define SERIAL_DEBUG 0
 
 #include "pros/rtos.hpp"
 #include "pros/serial.hpp"
@@ -18,7 +20,6 @@
 struct SmartSerialDiagnostic {
     uint8_t lastUUID;
     State currentState;
-    int availableBytes;
     size_t totalBytesRead;
     size_t totalBytesWritten;
     size_t readErrors;
@@ -88,7 +89,7 @@ class SmartSerial {
             [](void *param) -> void {
                 static_cast<SmartSerial *>(param)->serialReader_fn(param);
             },
-            this) {};
+            this){};
     ~SmartSerial() = default;
 
     /**
@@ -170,4 +171,4 @@ class SmartSerial {
     SmartSerialDiagnostic getDiagnostics();
 };
 
-#endif // SERIAL_ESP32_HPP
+#endif // SMART_SERIAL_HPP

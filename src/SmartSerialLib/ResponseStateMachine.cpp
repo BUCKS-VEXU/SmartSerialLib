@@ -27,8 +27,6 @@ State ResponseStateMachine::getCurrentState() {
 // TODO the state machine doesn't report any errors to SmartSerial right now
 
 void ResponseStateMachine::loop(uint8_t byte) {
-    this->smartSerial->totalBytesRead++;
-
     switch (currentState) {
     case STATE_IDLE:
         if (byte == START_MARKER) {
@@ -54,16 +52,16 @@ void ResponseStateMachine::loop(uint8_t byte) {
     case STATE_LENGTH:
         payloadLength = byte;
         calculatedChecksum += byte;
-        currentState = STATE_PAYLOAD;
+        currentState = (payloadLength > 0) ? STATE_PAYLOAD : STATE_CHECKSUM;
         break;
 
     case STATE_PAYLOAD:
-        if (bufferIndex == payloadLength) {
-            currentState = STATE_CHECKSUM;
-            break;
-        }
         buffer[bufferIndex++] = byte;
         calculatedChecksum += byte;
+
+        if (bufferIndex == payloadLength) {
+            currentState = STATE_CHECKSUM;
+        }
         break;
 
     case STATE_CHECKSUM:
