@@ -52,8 +52,6 @@ int SmartSerial::addResponse(SerialResponse &response) {
     std::lock_guard<pros::Mutex> lock(payloadMutex);
 
     bool hadPayload = payloads[UUID].has_value();
-    // TODO i'm not certain that this properly constructs a new shared pointer,
-    // it probably does.
     payloads[UUID] = response.payload;
 
     // Is there a task waiting for a response with this UUID? Notify it
@@ -63,7 +61,9 @@ int SmartSerial::addResponse(SerialResponse &response) {
     }
 
     if (hadPayload) {
+#if SERIAL_DEBUG
         std::cout << "Payload already present at index " << UUID << "\n";
+#endif
         return -1;
     }
 

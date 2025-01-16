@@ -3,6 +3,7 @@
 #include "main.h"
 
 #include "SmartSerialLib/SmartSerial.hpp"
+#include "SmartSerialLib/protocol/ProtocolDefinitions.hpp"
 #include "liblvgl/llemu.hpp"
 
 SmartSerial esp32Serial(7, 576000);
@@ -18,16 +19,17 @@ void onCenterButton() {
 }
 
 void onLeftButton() {
-    SerialPrintPayloadRequest printPayload({0x01, 0x02, 0x03});
-    int printResponse =
-        esp32Serial.sendAndDeserializeResponse(printPayload, 1000);
+    GetPoseRequest poseRequest;
+    int poseResponse =
+        esp32Serial.sendAndDeserializeResponse(poseRequest, 1000);
 
-    if (printResponse != 0) {
-        pros::lcd::print(3, "Print error: %d", printResponse);
+    if (poseResponse != 0) {
+        pros::lcd::print(1, "Get pose error: %d", poseResponse);
         return;
     } else {
+        pose2d_t pose = poseRequest.getPose();
         pros::lcd::print(
-            3, "Printed %d bytes\n", printPayload.getBytesPrinted());
+            1, "Pose: (%.2f, %.2f, %.2f)", pose.x, pose.y, pose.theta);
     }
 }
 

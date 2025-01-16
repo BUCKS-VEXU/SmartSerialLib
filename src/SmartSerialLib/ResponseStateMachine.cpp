@@ -19,6 +19,8 @@ void ResponseStateMachine::onMissingEndMarker(uint8_t byte) const {
 }
 
 void ResponseStateMachine::onMessageComplete() const {
+    // TODO handle error responses (commandID = ERROR)
+
     auto payload = std::make_shared<std::vector<uint8_t>>(
         payloadBuffer, payloadBuffer + payloadLength);
     SerialResponse response = {
