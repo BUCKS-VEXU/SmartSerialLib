@@ -3,44 +3,25 @@
 #ifndef STATE_MACHINE_HPP
 #define STATE_MACHINE_HPP
 
-#include <cstddef>
-#include <cstdint>
+#include "protocol/MessageStateMachine/StateMachine.hpp"
+#include <iostream>
 
-// Forward declaration of SmartSerial
+// Forward declare SmartSerial
 class SmartSerial;
 
-// Enum for states
-enum State {
-  STATE_IDLE,
-  STATE_UUID,
-  STATE_LENGTH,
-  STATE_COMMAND,
-  STATE_PAYLOAD,
-  STATE_CHECKSUM,
-  STATE_COMPLETE
-};
+class ResponseStateMachine : public StateMachine {
+  protected:
+    void onChecksumFail() const override;
+    void onMissingStartMarker(uint8_t byte) const override;
+    void onMissingEndMarker(uint8_t byte) const override;
+    void onMessageComplete() const override;
 
-class ResponseStateMachine {
-private:
-  State currentState = STATE_IDLE;
-  uint8_t buffer[256]; // Buffer for incoming messages
-  size_t bufferIndex = 0;
+  private:
+    SmartSerial *smartSerial; // Pointer to the SmartSerial instance
 
-  uint8_t UUID = 0;
-  uint8_t payloadLength = 0;
-  uint8_t commandID = 0;
-  uint8_t checksum = 0;
-  uint8_t calculatedChecksum = 0;
-
-  SmartSerial *smartSerial; // Pointer to the SmartSerial instance
-
-public:
-  ResponseStateMachine(SmartSerial *serial) : smartSerial(serial) {}
-  inline void reset();
-  inline bool isIdle();
-  void loop(uint8_t byte);
-  State getCurrentState();
-  // Add methods as needed
+  public:
+    ResponseStateMachine(size_t bufferSize, SmartSerial *serial) :
+        StateMachine(bufferSize), smartSerial(serial) {}
 };
 
 #endif // STATE_MACHINE_HPP

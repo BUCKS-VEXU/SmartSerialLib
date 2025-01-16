@@ -83,8 +83,7 @@ class SmartSerial {
         payloadMutex(),
         payloads(),
         waitingTasks(),
-        stateMachine(this),
-        // TODO God only knows if this works
+        stateMachine(256, this),
         serialReader(
             [](void *param) -> void {
                 static_cast<SmartSerial *>(param)->serialReader_fn(param);
